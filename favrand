@@ -14,7 +14,8 @@
 (define *twitter-api-server* "api.twitter.com")
 
 (define (usage)
-  (print "usage: favrand [-j|json] <twitter-id>"))
+  (print "usage: favrand [-j|json] <twitter-id>")
+  (exit 0))
 
 (define rand
   (let1 m (make <mersenne-twister> :seed (sys-time))
@@ -100,6 +101,7 @@
   (let-args (cdr args)
       ((json "j|json")
        (user "u|user=s")
+       (help "h|help" => usage)
        . rest)
     (let ((user (or user
                     (and (not (null? rest))
