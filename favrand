@@ -1,0 +1,112 @@
+#!/usr/local/bin/gosh
+
+(use srfi-1) ; remove
+(use srfi-19) ; date
+(use srfi-43) ; vector
+(use rfc.822) ; rfc822-date->date
+(use rfc.http) ; http-get
+(use rfc.json) ; parse-json-string
+(use util.list) ; assoc-ref
+(use util.list) ; intersperse
+(use math.mt-random) ; <mersenne-twister>, mt-random-integer
+(use gauche.parseopt) ; let-args
+
+(define *twitter-api-server* "api.twitter.com")
+
+(define (usage)
+  (print "usage: favrand [-j|json] <twitter-id>"))
+
+(define rand
+  (let1 m (make <mersenne-twister> :seed (sys-time))
+    (^n (mt-random-integer m n))))
+
+;; http://valvallow.blogspot.com/2011/02/query-string.html
+(define (query-compose query)
+  (string-join (map (cut string-join <> "=") query) "&"))
+
+
+(define (twitter-api-get server url params)
+  (receive (status header body)
+      (http-get server
+                (string-append url "." "json"
+                               "?" (query-compose params)))
+    (rlet1 r (parse-json-string body)
+           (when (and (not (vector? r))
+                      (string=? "error" (caar r)))
+             (raise "user not found."))
+           )))
+
+(define (twitter-api-user-show id)
+  (twitter-api-get *twitter-api-server*
+                   "/1/users/show" `(("id" ,id))))
+
+(define (twitter-api-random-favorite-page-number id)
+  (let* ((total-fav-count (assoc-ref (twitter-api-user-show id)
+                                     "favourites_count"))
+         (pages (quotient total-fav-count 20)))
+    (rand (+ pages 1)))) ;; favorite page index started 1;
+
+(define (twitter-api-favorites id :optional (page 1))
+  (twitter-api-get *twitter-api-server*
+                   "/1/favorites"
+                   `(("id" ,id)("page" ,(x->string page)))))
+
+(define (twitter-api-random-favorite id)
+  (let ((favs (twitter-api-favorites
+               id (twitter-api-random-favorite-page-number id))))
+    (when (equal? favs #())
+      (raise #`",id has no favorite."))
+    (vector-ref favs (rand (vector-length favs)))))
+
+(define (twitter-date->date str)
+  (define (list-join delim ls)
+    (apply string-append (intersperse delim ls)))
+  (let* ((ls (string-split str " "))
+         (date-string (list-join " " (map (pa$ list-ref ls)
+                                          '(0 2 1 5 3 4)))))
+    (rfc822-date->date date-string)))
+
+(define (print-favorite fav)
+  (define (twitter-date-format str)
+    (date->string (twitter-date->date str) "~Y/~m/~d ~H:~M:~S"))
+  (let* ((fav-id (assoc-ref fav "id"))
+         (text (assoc-ref fav "text"))
+         (user (assoc-ref fav "user"))
+         (screen-name (assoc-ref user "screen_name"))
+         (name (assoc-ref user "name"))
+         (retweets (assoc-ref fav "retweet_count"))
+         (created (assoc-ref fav "created_at")))
+    (let ((fav-url (format "http://twitter.com/~a/status/~a"
+                           screen-name fav-id)))
+      (print #`"id : ,name (@,screen-name)")
+      (print #`"url : ,fav-url")
+      (print #`"date : ,(twitter-date-format created)")
+      (print #`"retweet count : ,retweets")
+      (print text))))
+
+(define (path-info->alist str keys)
+  (and str (map cons keys (cdr (string-split str "/")))))
+
+(define (print-random-favorite id)
+  (guard (e (else (print e)))
+    (print-favorite (twitter-api-random-favorite id))))
+
+(define (transform-tweet-json alist)
+  (remove (lambda (e)
+            (string=? "source" (car e)))
+          alist))
+
+(define (main args)
+  (let-args (cdr args)
+      ((json "j|json")
+       (user "u|user=s")
+       . rest)
+    (let ((user (or user
+                    (and (not (null? rest))
+                         (car rest))
+                    (read-line))))
+      (if json
+          (print (construct-json-string
+                  (transform-tweet-json
+                   (twitter-api-random-favorite user))))
+          (print-random-favorite user)))))
