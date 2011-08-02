@@ -92,10 +92,26 @@
   (guard (e (else (print e)))
     (print-favorite (twitter-api-random-favorite id))))
 
+(define (walk-json-alist alist :key (key-fun identity)(val-fun identity))
+  (define (junction x)
+    (cond ((pair? x)(walk-json-alist x :key-fun key-fun :val-fun val-fun))
+          ((vector? x)(vector-case x))
+          (else (val-fun x))))
+  (define (vector-case v)
+    (vector-map (^ (idx e)
+                   (junction e))
+                v))
+  (map (^l (cons (key-fun (car l))
+                 (junction (cdr l))))
+       alist))
+
 (define (transform-tweet-json alist)
-  (remove (lambda (e)
-            (string=? "source" (car e)))
-          alist))
+  (walk-json-alist
+   alist
+   :val-fun (lambda (s)
+              (if (string? s)
+                  (regexp-replace-all #/\"/ s "\\\\\"")
+                  s))))
 
 (define (main args)
   (let-args (cdr args)
