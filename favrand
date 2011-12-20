@@ -123,9 +123,8 @@
        (run-process '(tput "clear")))
     (^ _ (let1 tweet (twitter-api-random-favorite user)
            (while #t
-             (run-process '(tput "ed"))
-             (run-process '(tput "cup" 0 0))
              (print-favorite tweet)
+             (print)
              (sys-nanosleep (* interval 1000000))
              (set! tweet (twitter-api-random-favorite user))
              (flush))))
