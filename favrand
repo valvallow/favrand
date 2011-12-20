@@ -10,11 +10,15 @@
 (use util.list) ; intersperse
 (use math.mt-random) ; <mersenne-twister>, mt-random-integer
 (use gauche.parseopt) ; let-args
+(use gauche.process) ; run-process
 
 (define *twitter-api-server* "api.twitter.com")
 
 (define (usage)
-  (print "usage: favrand [-j|json] <twitter-id>")
+  (print "usage: favrand [options ...] <twitter-id>")
+  (print "  - j|json : print random tweet json")
+  (print "  - u|user : twitter use id")
+  (print "  - a|auto : auto refresh (millisecond)")
   (exit 0))
 
 (define rand
@@ -113,18 +117,36 @@
                   (regexp-replace-all #/\"/ s "\\\\\"")
                   s))))
 
+(define (print-random-favorite-auto-refresh user interval)
+  (dynamic-wind
+    (^ _ (run-process '(tput "civis"))
+       (run-process '(tput "clear")))
+    (^ _ (let1 tweet (twitter-api-random-favorite user)
+           (while #t
+             (run-process '(tput "ed"))
+             (run-process '(tput "cup" 0 0))
+             (print-favorite tweet)
+             (sys-nanosleep (* interval 1000000))
+             (set! tweet (twitter-api-random-favorite user))
+             (flush))))
+    (^ _ (run-process '(tput "cnorm")))))
+
+(define (num-format cur max)
+  (format "~3d%" (round->exact (/. (* cur 100) max))))
+
 (define (main args)
   (let-args (cdr args)
       ((json "j|json")
        (user "u|user=s")
+       (auto-refresh "a|auto=i")
        (help "h|help" => usage)
        . rest)
     (let ((user (or user
                     (and (not (null? rest))
                          (car rest))
                     (read-line))))
-      (if json
-          (print (construct-json-string
-                  (transform-tweet-json
-                   (twitter-api-random-favorite user))))
-          (print-random-favorite user)))))
+      (cond (json (print (construct-json-string
+                          (transform-tweet-json
+                           (twitter-api-random-favorite user)))))
+            (auto-refresh (print-random-favorite-auto-refresh user auto-refresh))
+            (else (print-random-favorite user))))))
